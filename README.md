@@ -495,3 +495,258 @@ Avoid:
 * index = **performance backbone**
 
 ---
+
+# DATABASE INDEXING
+
+## SCENARIO
+
+If you have 1 million users:
+```sql
+SELECT * FROM users WHERE email = 'a@b.com';
+```
+### What happens without index?
+- DB does full table scan
+- checks every row
+- complexity ≈ O(n)
+
+### What happens with index?
+- DB uses B-tree index (default in most DBs)
+- complexity ≈ O(log n)
+
+### Why can too many indexes be bad?** (This is IMPORTANT)
+
+This is BAD ❌
+
+**🔥 Problem 1: Slow Writes**
+
+Every time I do:
+```sql
+INSERT INTO users ...
+```
+
+DB must:
+
+- insert row
+- update ALL indexes
+
+👉 More indexes = more work
+
+---
+
+Example:
+
+If you have indexes on:
+
+- email
+- username
+- phone
+- created_at
+
+Then 1 insert = 4 extra updates
+
+---
+
+**🔥 Problem 2: More Memory Usage**
+
+Indexes are stored separately.
+
+👉 More indexes = more RAM + disk usage
+
+**🔥 Problem 3: Slower Updates**
+```sql
+UPDATE users SET email = ...
+```
+
+DB must:
+
+- update table
+- update index
+
+**🔥 Problem 4: Query Planner Confusion**
+
+Too many indexes:
+
+- DB may pick wrong index
+- query becomes slower (yes, ironic)
+
+### 🧠 RULE OF THUMB
+
+**👉 Index only:**
+
+- columns used in `WHERE`
+- columns used in `JOIN`
+- columns used in `ORDER BY`
+
+❌ NOT: 
+
+*everything blindly*
+
+### REAL EXAMPLE
+
+**Bad:**
+```sql
+CREATE INDEX idx_everything ON users(name, age, city, bio);
+```
+❌ useless, heavy
+
+**Good:**
+```sql
+CREATE INDEX idx_users_email ON users(email);
+```
+✔ targeted, fast
+
+## 🧠 MENTAL MODEL
+
+Think:
+
+- **Table** = raw data
+- **Index** = shortcut map
+
+But:
+👉 too many shortcuts = maintenance hell
+
+## Real backend question:
+I have this query:
+```sql
+SELECT * FROM users 
+WHERE email = 'a@b.com' AND status = 'active';
+```
+
+1. Should I create:
+- index on `email`?
+- index on `status`?
+- or **composite index** (email, status)?
+2. Why?
+
+## 🧠 Answer (My Thinking)
+
+### Query
+
+```sql
+SELECT * FROM users 
+WHERE email = 'a@b.com' AND status = 'active';
+```
+
+---
+
+### What I would do
+
+I would create a **composite index on (email, status)**
+
+```sql
+CREATE INDEX idx_users_email_status ON users(email, status);
+```
+
+---
+
+### Why I choose this
+
+#### 1. I look at selectivity
+
+* `email` → highly unique (almost 1 row)
+* `status` → low selectivity (many users can be "active")
+
+👉 So:
+
+* `email` alone is already very powerful
+* `status` alone is weak
+
+---
+
+#### 2. I think how DB executes query
+
+DB will:
+
+1. find rows by index
+2. then filter remaining conditions
+
+---
+
+#### Case A: Index on `status`
+
+* DB finds ALL active users ❌ (too many rows)
+* then filters email → slow
+
+---
+
+#### Case B: Index on `email`
+
+* DB finds 1 row quickly ✅
+* then checks status → already fast
+
+---
+
+#### Case C: Composite index `(email, status)`
+
+* DB directly finds exact row ✅ (best case)
+
+---
+
+### Important rule I will follow
+
+👉 **Order matters in composite index**
+
+I put:
+
+```text
+(email, status)
+```
+
+NOT:
+
+```text
+(status, email)
+```
+
+---
+
+### Why order matters
+
+Because DB uses index **left to right**
+
+* `(email, status)` → can search by:
+
+  * email ✅
+  * email + status ✅
+
+* `(status, email)` → can search by:
+
+  * status ❌ (too many rows)
+  * status + email (less efficient)
+
+---
+
+## My final decision logic
+
+* If I query mostly by email → index(email) is enough
+* If I frequently query by both → composite index
+
+---
+
+## My production mindset
+
+I don’t blindly add indexes.
+
+I ask:
+
+* what queries are frequent?
+* what columns are selective?
+* what reduces scan size fastest?
+
+---
+
+## Final Answer (short)
+
+I would create:
+
+```sql
+(email, status)
+```
+
+Because:
+
+* email is highly selective
+* combining both gives fastest lookup
+* avoids unnecessary row scans
+
+---
