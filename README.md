@@ -219,3 +219,279 @@ Which is EXACTLY where I should be before leveling up.
 
 ## Iteration 2
 
+In this iteration I moved the idempotency handling from an in‑memory `Map` to a relational database, which gives me persistence across server restarts and works in a multi‑instance setup.
+
+### Database schema
+
+#### Payments table
+```sql
+payments
+--------
+id (pk)
+amount
+status
+created_at
+```
+
+#### Idempotency keys table
+```sql
+idempotency_keys
+----------------
+key (unique)
+request_hash   -- SHA‑256 hash of the request payload (e.g., `{ amount }`)
+response_json  -- JSON payload that was returned the first time
+status         -- HTTP status code that accompanied the response
+created_at     -- Timestamp when the entry was created
+```
+
+### What changed in the code
+
+* Replaced the simple `const cache = new Map<string, unknown>()` with a richer cache that stores `requestHash`, `responseJson`, `status`, and `createdAt` in memory.
+* Added a deterministic request hash using **SHA‑256** to ensure the same idempotency‑key can only be reused with an identical request body.
+* On a cache hit I now compare the stored hash with the incoming request hash. If they differ, I return **409 Conflict** with a clear error message.
+* The cached entry also records the HTTP status and creation timestamp, which will later be persisted to the `idempotency_keys` table.
+* Updated the error structure to be more explicit and consistent across the API.
+
+These changes bring the API closer to production‑ready behavior while still keeping the implementation in memory for the learning exercise. The next step will be to replace the in‑memory store with actual DB calls (e.g., using an ORM or raw queries) and add proper concurrency protection.
+
+
+# SOME QUESTION IN THIS TASK
+
+## 🧠 Idempotency + DB Concepts (Consolidated)
+
+## 1. Why do we store `request_hash`?
+
+To ensure that the **same idempotency key is used with the same request payload**.
+
+### Problem it solves:
+
+If a client mistakenly (or maliciously) sends:
+
+* same key
+* different request body
+
+Without hash → backend cannot detect mismatch ❌
+With hash → backend compares and rejects ✅
+
+---
+
+## 2. What happens if I ONLY store the key?
+
+I will get **data inconsistency bugs**.
+
+### Example:
+
+Request 1:
+
+* key = abc123
+* amount = 500
+
+Request 2:
+
+* key = abc123
+* amount = 1000
+
+Without hash:
+→ backend returns old response (500) ❌
+→ system state becomes incorrect
+
+---
+
+## 3. If same key + different request → what should backend do?
+
+Return:
+
+```
+HTTP 409 Conflict
+```
+
+### Response:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "IDEMPOTENCY_CONFLICT",
+    "message": "Same key used with different request"
+  }
+}
+```
+
+---
+
+## 4. Why NOT hash full request (headers + body)?
+
+Because headers contain **non-business data**.
+
+### Headers like:
+
+* Authorization
+* User-Agent
+* Idempotency-Key
+
+These:
+
+* change frequently
+* don’t define the operation
+
+### Rule:
+
+Hash only **business-relevant payload**
+
+---
+
+## 5. Where do we store `request_hash` in DB?
+
+### Table: `idempotency_keys`
+
+```sql
+idempotency_keys
+----------------
+key (PRIMARY KEY)
+request_hash TEXT
+response_json JSONB
+status VARCHAR
+created_at TIMESTAMP
+```
+
+---
+
+## 6. Why separate `payments` and `idempotency_keys` tables?
+
+### Separation of concerns:
+
+| Table            | Responsibility                   |
+| ---------------- | -------------------------------- |
+| payments         | actual business transaction      |
+| idempotency_keys | request tracking + deduplication |
+
+---
+
+## 7. What happens if 2 requests hit at same time with same key?
+
+### Problem:
+
+Race condition ⚠️
+
+Both requests:
+
+* see no existing key
+* both process payment → duplicate ❌
+
+---
+
+## 8. How to fix concurrency issue?
+
+### Option 1: DB constraint (recommended)
+
+```sql
+key TEXT PRIMARY KEY
+```
+
+→ second insert fails automatically
+
+---
+
+### Option 2: Redis lock (distributed systems)
+
+Use:
+
+* SETNX (set if not exists)
+
+---
+
+## 9. What is a DB index?
+
+An index is a **data structure that speeds up lookups**.
+
+Think:
+
+* like book index → jump directly to page
+* instead of scanning entire book
+
+---
+
+## 10. Why queries are slow without index?
+
+Without index:
+→ DB scans **every row** (O(n))
+
+With index:
+→ DB uses **B-tree / hash lookup** (O(log n))
+
+---
+
+## 11. Difference:
+
+### `WHERE id = ?`
+
+* Fast ✅
+* usually indexed (primary key)
+
+---
+
+### `WHERE name = ?`
+
+* Slow ❌ (if no index)
+* causes full table scan
+
+---
+
+## 12. What should be indexed?
+
+Index:
+
+* primary keys
+* frequently searched fields
+* foreign keys
+
+Avoid:
+
+* indexing everything (slows writes)
+
+---
+
+## 13. Production-level Idempotency Flow
+
+1. Receive request with key
+2. Generate request_hash
+3. Check DB:
+
+   * key exists?
+
+     * hash match → return stored response
+     * hash mismatch → 409 conflict
+4. If not exists:
+
+   * insert key (lock)
+   * process payment
+   * store response
+5. return response
+
+---
+
+## 14. My current implementation status
+
+✅ Correct:
+
+* idempotency key usage
+* request hashing
+* conflict detection
+
+⚠️ Missing for production:
+
+* persistent DB (instead of Map)
+* concurrency safety
+* structured error format
+* TTL (expiry for keys)
+
+---
+
+## 15. Final Mental Model
+
+* Idempotency = **safe retries**
+* request_hash = **intent validation**
+* DB = **source of truth**
+* index = **performance backbone**
+
+---
