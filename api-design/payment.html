@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Mini Task Payment</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-neutral-50 min-h-screen flex items-center justify-center p-4">
+    <div class="w-full max-w-md">
+      <h2 class="text-2xl font-bold text-center mb-6">Payment</h2>
+      <form id="paymentForm" class="space-y-4">
+        <div>
+          <label for="amount" class="block text-sm font-medium mb-1">Amount</label>
+          <input
+            type="number"
+            id="amount"
+            name="amount"
+            required
+            class="w-full px-4 py-2 rounded-lg border border-neutral-200 focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400"
+            placeholder="Enter amount"
+          />
+        </div>
+        <button
+          type="submit"
+          class="w-full bg-neutral-800 hover:bg-neutral-700 text-neutral-50 py-2 rounded-lg font-medium transition-colors"
+        >
+          Submit Payment
+        </button>
+      </form>
+    </div>
+
+    <script>
+      document.getElementById('paymentForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const paymentAmount = document.getElementById('amount').value;
+        const idempotencyKey = 'key-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+        console.log('Generated Idempotency Key:', idempotencyKey);
+        console.log('Payment Amount:', paymentAmount);
+
+        fetch('http://localhost:3001/payments', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'idempotency-key': idempotencyKey,
+          },
+          body: JSON.stringify({ amount: paymentAmount })
+        })
+          .then(response => response.json())
+          .then(data => console.log(data))
+          .catch(e => console.error('Error: ', e));
+
+        alert('Payment submitted with Key: ' + idempotencyKey);
+      });
+    </script>
+  </body>
+</html>
