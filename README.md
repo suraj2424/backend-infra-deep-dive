@@ -78,3 +78,144 @@ This project was created using `bun init` in bun v1.3.6. [Bun](https://bun.com) 
 - **In‑memory cache**: Stores responses keyed by idempotency key to ensure idempotent requests.
 - **Frontend**: `payment.html` provides a simple UI to submit payments via the API.
 
+### Corrections
+
+#### ❌ PRODUCTION GAPS (IMPORTANT)
+
+**❌ 1. In-memory cache = WRONG for production**
+```typescript
+const cache = new Map<string, unknown>();
+```
+
+Problem:
+- server restart → data lost ❌
+- multiple instances → inconsistency ❌
+- not distributed ❌
+
+✅ Fix:
+
+Use: 
+
+- Redis (fast + distributed)
+
+OR
+
+- DB table (strong consistency)
+
+
+**❌ 2. No request fingerprinting**
+
+Right now:
+```typescript
+cache.set(key, result);
+```
+
+Problem:
+
+- Same key + different body = ❌ inconsistent state
+
+✅ Production pattern:
+
+Store:
+
+```json
+{
+  "key": "abc123",
+  "request_hash": "hashed_body",
+  "response": {...},
+  "status": "completed"
+}
+```
+
+**❌ 3. Error structure is weak**
+
+I used:
+
+```typescript
+return { error: 'Amount must be greater than 0' };
+```
+
+❌ Problem:
+
+- not structured
+- frontend cannot reliably act
+
+✅ Fix:
+```typescript
+return {
+  success: false,
+  error: {
+    code: "INVALID_AMOUNT",
+    message: "Amount must be greater than 0"
+  }
+};
+```
+
+**❌ 4. No status codes consistency**
+
+You set:
+```typescript
+set.status = 400;
+```
+
+✔ good — but missing:
+
+409 → idempotency conflict
+201 → created
+500 → internal
+
+**❌ 5. No real DB model (CRITICAL)**
+
+You didn’t answer this part:
+
+`What DB structure?`
+
+✅ Correct design:
+```sql
+payments
+--------
+id (pk)
+amount
+status
+created_at
+
+idempotency_keys
+----------------
+key (unique)
+request_hash
+response_json
+status
+created_at
+```
+
+**❌ 6. No concurrency protection**
+
+Edge case:
+
+- 2 requests hit at same time with same key
+
+My code:
+```typescript
+if (stored) return stored;
+```
+⚠ Race condition possible
+
+✅ Real fix:
+
+- Redis SETNX (lock)
+
+OR
+
+- DB unique constraint on key
+
+
+#### 🧠 WHAT I BUILT (LEVEL)
+
+I'm currently at:
+
+👉 “Correct concept, not production safe yet”
+
+Which is EXACTLY where I should be before leveling up.
+
+## Iteration 2
+

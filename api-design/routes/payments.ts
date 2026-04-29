@@ -22,17 +22,27 @@ export const definePaymentRoutes = (app: Elysia) => {
       }
 
       const stored = cache.get(key);
-      if (stored) return stored;
+      if (stored) {
+        set.status = 200;
+        return stored;
+      }
 
       const transactionId = 'txn_' + Math.random().toString(16).slice(2);
 
+      const isSuccess = amount > 400 ? false : true; 
+
       const result = {
-        status: amount > 400 ? 'error' : 'success',
-        simulated: true,
+        status: isSuccess,
         transactionId,
         amount,
         timestamp: new Date().toISOString(),
       };
+
+      if(isSuccess) {
+        set.status = 201
+      } else {
+        set.status = 422
+      }
 
       cache.set(key, result);
       return result;
