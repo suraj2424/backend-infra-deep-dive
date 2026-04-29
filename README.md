@@ -750,3 +750,118 @@ Because:
 * avoids unnecessary row scans
 
 ---
+
+# REDIS + CACHING (backend becomes fast at scale)
+
+What is caching (in your own words)?
+Where have you used it (even basic level)?
+What problem does caching solve?
+
+**ANSWER 1**
+
+**✔️ My idea:**
+
+“store repeated answers”
+
+**🔥 Real definition:**
+
+- 👉 Caching = storing expensive-to-compute or frequently-used data in a faster layer to avoid recomputation or DB hits
+
+**ANSWER 2**
+
+**✔️ My idea:**
+
+"In data structures and algorithms problems, where we use memoization"
+
+**ANSWER 3**
+
+**✔️ My idea:**
+I said “time complexity” → correct but incomplete.
+
+**🔥 In production:**
+
+Caching reduces:
+- DB load
+- latency (response time)
+- cost (fewer DB queries)
+- system pressure under traffic
+
+## DEFINITION (REDIS)
+
+- in memory key-value store
+- extremely fase
+- used as:
+  - cache
+  - rate limiter
+  - session store
+  - pub/sub system
+
+
+## CORE PATTERNS
+
+### 1. Cache Aside
+
+**Flow:**
+1. check cache
+2. if miss → query DB
+3. store in cache
+3. return
+
+**Example:**
+```typescript
+async function getUser(id: string) {
+  const cached = await redis.get(`user:${id}`);
+  if (cached) return JSON.parse(cached);
+
+  const user = await db.getUser(id);
+
+  await redis.set(`user:${id}`, JSON.stringify(user), "EX", 60);
+
+  return user;
+}
+```
+
+### 2. Write Through
+
+- write → DB + cache together
+
+✔ consistent
+❌ slower writes
+
+### 3. Write Back (advanced)
+
+- write → cache first
+- DB updated later
+
+✔ very fast
+❌ risk of data loss
+
+
+## ⚠️ BIG PROBLEM: CACHE INVALIDATION
+- Hardest problem in backend.
+
+**EXAMPLE:**
+```http
+GET /user/1  → cached
+UPDATE user → DB updated
+```
+❌ cache still old → stale data
+
+**Solutions:**
+- TTL (expiry)
+- manual invalidation
+- event-driven invalidation
+
+### 🧠 WHERE YOU WILL USE CACHE
+
+Real cases:
+- user profile
+- product listings
+- dashboards
+- expensive computations
+
+## ⚠️ WHEN NOT TO CACHE
+- highly dynamic data
+- critical real-time data (payments status)
+- small datasets
+
